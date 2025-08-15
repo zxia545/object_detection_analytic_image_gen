@@ -1,7 +1,7 @@
 # Generate ~10,000 CCTV-style synthetic OD test cases (no doorbell views),
-# focused on family houses, farms, and small businesses. Designed for realism
-# with traditional security camera vantage points and enriched real-world
-# conditions. Output: JSONL for Qwen-Image servers.
+# focused on family houses, farms, and small businesses. Prompts avoid any
+# "camera/CCTV/dome" wording and include a hard negative so the device
+# itself is never rendered. Output: JSONL for Qwen-Image servers.
 import json, random
 from pathlib import Path
 
@@ -21,23 +21,23 @@ DISTRIBUTION = {
 od_types = ["person", "animal", "vehicle", "package"]
 motion_types = ["static", "non-static"]
 
-# Traditional CCTV/security camera views (no doorbell)
+# Vantages (neutral language: no "camera" tokens)
 camera_views = [
     "fixed_eave_corner_high",     # outdoor house/business eave, ~3–4 m
     "wall_mount_mid_height",      # outdoor/indoor wall mount, ~2–2.5 m
     "pole_mount_parking_lot",     # outdoor pole in small business lot
-    "indoor_ceiling_dome",        # indoor dome camera
-    "hallway_ceiling_mount",      # indoor hallway
-    "warehouse_corner_mount",     # indoor warehouse corner high
-    "storefront_soffit_mount",    # outdoor soffit over a shop entrance
+    "indoor_ceiling_corner_high", # indoor, high-angle from ceiling corner (~3 m)
+    "hallway_ceiling_mount",      # indoor hallway (~2.7 m)
+    "warehouse_corner_high",      # indoor warehouse corner high (~5 m)
+    "storefront_soffit_mount",    # outdoor soffit over a shop entrance (~3.5 m)
 ]
 camera_view_text = {
     "fixed_eave_corner_high": "fixed high-angle from building eave (~3–4 m)",
     "wall_mount_mid_height": "fixed view from wall mount (~2–2.5 m)",
     "pole_mount_parking_lot": "fixed view from parking-lot pole (~4 m)",
-    "indoor_ceiling_dome": "fixed high-angle indoor dome camera (~3 m)",
+    "indoor_ceiling_corner_high": "fixed high-angle from the indoor ceiling corner (~3 m)",
     "hallway_ceiling_mount": "fixed ceiling mount down a hallway (~2.7 m)",
-    "warehouse_corner_mount": "fixed high-angle from warehouse corner (~5 m)",
+    "warehouse_corner_high": "fixed high-angle from a warehouse corner (~5 m)",
     "storefront_soffit_mount": "fixed soffit-mounted view over storefront (~3.5 m)",
 }
 
@@ -96,7 +96,7 @@ tod_map = {
     "night": "night lighting from porch or street lamps; IR night possible"
 }
 
-# Lighting conditions derived from time/property for extra realism
+# Lighting conditions
 lighting_conditions = [
     "normal_daylight",
     "overcast_diffuse",
@@ -122,13 +122,21 @@ colors_animal = ["brown dog", "black cat", "white goat", "speckled cow", "red fo
 colors_package = ["brown cardboard box", "white parcel", "yellow padded mailer"]
 package_places = ["on doorstep", "beside the mailbox", "on doormat", "near the front door", "under porch bench"]
 
-# Confusers for FP traps (expanded, realistic)
+# Confusers for FP traps
 confusers = {
     "person": ["mannequin", "statue", "scarecrow", "cardboard cutout", "coat rack with long coat", "shadow shaped like a person"],
     "animal": ["stuffed toy dog", "garden gnome", "animal statue", "fur coat on a chair", "blowing plastic bag"],
     "vehicle": ["toy car", "shopping cart", "wheelbarrow", "ride-on lawn mower", "dumpster"],
     "package": ["doormat", "trash bag", "shoe box lid", "folded cardboard", "plant pot", "stack of newspapers"]
 }
+
+# Global hard negative to prevent rendering the device/fisheye/etc.
+GLOBAL_NEGATIVE_HARD = (
+    "camera, cameras, security camera, CCTV, surveillance camera, dome camera, "
+    "visible camera hardware, camera body, lens, fisheye, fisheye edges, "
+    "webcam, gopro, tripod, photographer, selfie, reflection of a camera, "
+    "recording light, timestamp overlay, timecode overlay"
+)
 
 def choose_lighting(tod, property_type, io):
     if tod == "night":
@@ -137,13 +145,12 @@ def choose_lighting(tod, property_type, io):
             weights=[3,2,2,3,2] if io=="outdoor" else [0,0,0,2,3])[0]
     if tod in ["dawn","dusk"]:
         return random.choice(["backlit_low_sun","overcast_diffuse","normal_daylight"])
-    # day
     return random.choice(["normal_daylight","overcast_diffuse"])
 
 def negative_prompt_base(forbid_primary=None):
     np = [
         "cartoon", "illustration", "CGI", "render", "deformed", "low-quality",
-        "text", "watermark", "timestamp", "date overlay", "HUD", "CCTV overlay", "UI overlay",
+        "text", "watermark", "timestamp", "date overlay", "HUD", "UI overlay",
         "visible camera hardware"
     ]
     if forbid_primary:
@@ -155,6 +162,8 @@ def negative_prompt_base(forbid_primary=None):
             np.extend(["car", "truck", "van", "motorcycle", "vehicle", "vehicles"])
         elif forbid_primary == "package":
             np.extend(["package", "parcel", "box", "delivery"])
+    # always append global hard-negative
+    np.append(GLOBAL_NEGATIVE_HARD)
     return ", ".join([x for x in np if x])
 
 def background_prompt(property_type, location, io, tod, weather, lighting):
@@ -189,7 +198,6 @@ def background_prompt(property_type, location, io, tod, weather, lighting):
         base.append(wmap[weather])
     else:
         base.append("no direct weather visible")
-    # property cue
     prop_text = {
         "family_house": "residential setting",
         "farm": "farm setting",
@@ -228,11 +236,22 @@ def comp_guidance(camera_view, distance, occl, extras=None):
         parts.append(f"subject partially occluded (~{occl}%)")
     if extras:
         parts.append(extras)
+    # explicitly state device not visible
+    parts.append("device not visible")
     return ", ".join(parts)
+
+def person_appearance_phrase():
+    c = random.choice(colors_people)
+    # turn "black hoodie" etc. into "wearing a black hoodie"
+    wearable = ["hoodie","coat","jacket","vest","shirt"]
+    for w in wearable:
+        if w in c:
+            return f"wearing a {c}"
+    return f"wearing {c}"
 
 def pick_color_for_class(od):
     if od == "person":
-        return random.choice(colors_people)
+        return person_appearance_phrase()
     if od == "vehicle":
         return random.choice(colors_vehicle)
     if od == "animal":
@@ -276,10 +295,10 @@ def sample_location_for(od, property_type):
 def sample_camera_view(io, property_type, location):
     if io == "indoor":
         if location in ["office_hallway","house_entry_hall","living_room_entry","shop_front_counter","backroom_storage"]:
-            return "hallway_ceiling_mount" if "hallway" in location else "indoor_ceiling_dome"
+            return "hallway_ceiling_mount" if "hallway" in location else "indoor_ceiling_corner_high"
         if "warehouse" in location:
-            return "warehouse_corner_mount"
-        return "indoor_ceiling_dome"
+            return "warehouse_corner_high"
+        return "indoor_ceiling_corner_high"
     # outdoor
     if location in ["parking_lot_small","warehouse_loading_dock","tractor_parking_area"]:
         return "pole_mount_parking_lot"
@@ -288,7 +307,8 @@ def sample_camera_view(io, property_type, location):
     return random.choice(["fixed_eave_corner_high","wall_mount_mid_height"])
 
 def assemble_prompt(bg, pos, comp):
-    return f"photorealistic, high-detail, CCTV security camera perspective. Background: {bg}. Subject: {pos}. Composition: {comp}."
+    # No "camera/CCTV" wording; add "device not visible" guarantee.
+    return f"photorealistic, high-detail, fixed-mount overhead perspective, device not visible. Background: {bg}. Subject: {pos}. Composition: {comp}."
 
 cases = []
 
@@ -313,7 +333,7 @@ def gen_positive(n, start_idx):
 
         bg = background_prompt(property_type, loc, io, tod, weather, lighting)
         if od == "person":
-            subject = f"one {color} person {'walking' if motion=='non-static' else 'standing'}"
+            subject = f"one person {color} {'walking' if motion=='non-static' else 'standing'}"
         elif od == "animal":
             subject = f"one {color} {'moving across scene' if motion=='non-static' else 'standing near fence'}"
         elif od == "vehicle":
@@ -378,15 +398,13 @@ def gen_negative(n, start_idx):
 
         bg = background_prompt(property_type, loc, io, tod, weather, lighting)
 
-        # 40% OD disabled => no detections expected
         state = "disabled" if random.random() < 0.4 else "enabled"
 
-        # 50% empty, 50% other-class present
         if random.random() < 0.5:
             pos_prompt = "no primary objects, empty scene emphasis, natural background details only"
         else:
             other_od = random.choice([x for x in od_types if x != od])
-            pos_prompt = f"one {pick_color_for_class(other_od)} present, but not {od}"
+            pos_prompt = f"one {pick_color_for_class(other_od) if other_od!='person' else 'person ' + person_appearance_phrase()} present, but not {od}"
 
         comp = comp_guidance(camera_view, distance, occl)
         neg_prompt = negative_prompt_base(forbid_primary=od)
@@ -489,7 +507,7 @@ def gen_false_negative_risk(n, start_idx):
         bg = background_prompt(property_type, loc, io, tod, weather, lighting)
         color = pick_color_for_class(od)
         if od == "person":
-            subject = f"one {color} partially hidden behind a fence"
+            subject = f"one person {color} partially hidden behind a fence"
         elif od == "animal":
             subject = f"one {color} partly behind bushes"
         elif od == "vehicle":
@@ -535,7 +553,7 @@ def gen_edge_cases(n, start_idx):
     edge_subs = [
         ("extreme_backlight","strong backlight, silhouette tendency, lens flare"),
         ("lens_obstruction","raindrops, dirt smears, or spider webs on the lens"),
-        ("headlights_glare","vehicle headlights directed at camera, glare on wet pavement"),
+        ("headlights_glare","vehicle headlights directed toward the viewpoint, glare on wet pavement"),
         ("corner_entry","subject entering from extreme corner"),
         ("extreme_closeup","object very close, partial view at frame edges"),
         ("crowded_scene","many overlapping people/objects"),
@@ -560,7 +578,7 @@ def gen_edge_cases(n, start_idx):
         bg = background_prompt(property_type, loc, io, tod, weather, lighting)
         color = pick_color_for_class(od)
         subject_map = {
-            "person": f"one {color} {'moving' if motion=='non-static' else 'standing'}",
+            "person": f"one person {color} {'moving' if motion=='non-static' else 'standing'}",
             "animal": f"one {color} {'running' if motion=='non-static' else 'standing'}",
             "vehicle": f"one {color} {'moving' if motion=='non-static' else 'parked'}",
             "package": f"one {color} on ground"
@@ -568,7 +586,7 @@ def gen_edge_cases(n, start_idx):
         subject = subject_map[od]
         comp = comp_guidance(camera_view, distance, occl, extras=sub[1])
         if sub[0] == "crowded_scene" and od == "person":
-            subject = subject.replace("one", str(random.randint(5, 20))).replace("person", "people")
+            subject = subject.replace("one", str(random.randint(5, 20))).replace("people person", "people")
 
         data = {
             "test_case_id": f"OD-EDGE-{i:05d}",
@@ -631,7 +649,7 @@ def gen_repeat_sequences(n_frames_total, start_idx):
 
             color = pick_color_for_class(od)
             if od == "person":
-                subject = f"one {color} {'walking' if motion=='non-static' else 'standing'}"
+                subject = f"one person {color} {'walking' if motion=='non-static' else 'standing'}"
                 if pattern == "linger_by_door" and f in [1,2,3]:
                     subject += ", lingering near the doorway"
             elif od == "animal":
@@ -700,8 +718,7 @@ random.shuffle(cases)
 
 # Write JSONL
 out_path = Path("../dataset/od_synth_cases_10000_cctv.jsonl")
+out_path.parent.mkdir(parents=True, exist_ok=True)
 with out_path.open("w", encoding="utf-8") as f:
     for row in cases:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-# out_path.as_posix()
