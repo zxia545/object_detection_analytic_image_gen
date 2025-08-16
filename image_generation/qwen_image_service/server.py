@@ -26,7 +26,7 @@ OUTPUT_DIR = "/root/autodl-tmp/output_images"
 MIN_FREE_GB = 5  # 如果可用空间小于10GB则清理
 
 positive_magic = {
-    "en": " Ultra HD, 4K, cinematic composition.",
+    "en": "",
     "zh": " 超清，4K，电影级构图",
 }
 aspect_ratios = {

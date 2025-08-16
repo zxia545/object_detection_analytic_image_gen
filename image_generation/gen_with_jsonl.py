@@ -11,12 +11,20 @@ OUT_DIR = "gen_images"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 def submit_case(case):
+    # Check if output image already exists
+    task_id = case["test_case_id"]  # Use test_case_id as task_id for consistency
+    img_path = os.path.join(OUT_DIR, f"{task_id}.png")
+    
+    if os.path.exists(img_path):
+        print(f"⏭️  Skipping {task_id} - image already exists: {img_path}")
+        return None
+    
     payload = {
         "test_case_id": case["test_case_id"],
         "prompt": case["prompt"],
         "negative_prompt": case.get("negative_prompt", ""),
         "aspect_ratio": "16:9",  # 或者从 case 里推导
-        "num_inference_steps": 10,
+        "num_inference_steps": 30,
         "true_cfg_scale": 4.0,
         "seed": case.get("seed", random.randint(0, 100)),
         "language": "en"
@@ -56,4 +64,5 @@ if __name__ == "__main__":
         for line in f:
             case = json.loads(line)
             tid = submit_case(case)
-            wait_for_result(tid)
+            if tid:  # Only wait for result if case was submitted
+                wait_for_result(tid)

@@ -11,3 +11,5 @@
 .ipynb_checkpoints/
 
 __pycache__/
+
+image_generation/gen_images/*
