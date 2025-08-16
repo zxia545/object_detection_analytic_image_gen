@@ -12,4 +12,4 @@
 
 __pycache__/
 
-image_generation/gen_images/*
+!image_generation/gen_images/*
