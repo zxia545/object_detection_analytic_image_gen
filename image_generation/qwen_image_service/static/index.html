@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Qwen-Image 文生图服务</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts for a modern look -->
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Qwen-Image 文生图服务</h1>
+        <nav>
+            <button id="gen-tab" class="active">生成图片</button>
+            <button id="queue-tab">队列</button>
+            <button id="history-tab">历史记录</button>
+        </nav>
+    </header>
+
+    <!-- 生成图片 -->
+    <section id="gen-section">
+        <form id="gen-form">
+            <div class="form-row">
+                <label>正向提示词</label>
+                <textarea name="prompt" required rows="2" placeholder="如: 一只可爱的猫在花园里"></textarea>
+            </div>
+            <div class="form-row">
+                <label>反向提示词</label>
+                <input type="text" name="negative_prompt" placeholder="可选，如: 低质量, 模糊">
+            </div>
+            <div class="form-row">
+                <label>宽高比</label>
+                <select name="aspect_ratio">
+                    <option value="16:9">16:9（横版）</option>
+                    <option value="9:16">9:16（竖版）</option>
+                    <option value="1:1">1:1（正方形）</option>
+                    <option value="4:3">4:3</option>
+                    <option value="3:4">3:4</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>采样步数</label>
+                <input type="number" name="num_inference_steps" value="35" min="10" max="100">
+            </div>
+            <div class="form-row">
+                <label>CFG scale</label>
+                <input type="number" name="true_cfg_scale" value="4.0" min="1" max="10" step="0.1">
+            </div>
+            <div class="form-row">
+                <label>Seed</label>
+                <input type="number" name="seed" value="42" min="0" step="1">
+            </div>
+            <div class="form-row">
+                <label>语言</label>
+                <select name="language">
+                    <option value="zh">中文</option>
+                    <option value="en">英文</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <button type="submit">开始生成</button>
+                <span id="submit-tip"></span>
+            </div>
+        </form>
+
+        <div id="gen-progress" class="hidden">
+            <div class="loader"></div>
+            <span id="gen-status-text">图片生成中，请稍等...</span>
+        </div>
+        <div id="gen-result" class="hidden"></div>
+    </section>
+
+    <!-- 队列 -->
+    <section id="queue-section" class="hidden">
+        <h2>队列中任务</h2>
+        <table id="queue-table">
+            <thead>
+                <tr>
+                    <th>任务ID</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <button id="refresh-queue">刷新队列</button>
+    </section>
+
+    <!-- 历史记录 -->
+    <section id="history-section" class="hidden">
+        <h2>历史记录</h2>
+        <table id="history-table">
+            <thead>
+                <tr>
+                    <th>任务ID</th>
+                    <th>状态</th>
+                    <th>生成时间</th>
+                    <th>图片/错误</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <div class="history-pagination">
+            <button id="history-prev">上一页</button>
+            <span id="history-page-info"></span>
+            <button id="history-next">下一页</button>
+        </div>
+    </section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
