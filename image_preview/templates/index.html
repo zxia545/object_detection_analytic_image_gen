@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Preview - Object Detection Dataset</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header .subtitle {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+        
+        .container {
+            display: flex;
+            height: calc(100vh - 120px);
+            padding: 1rem;
+            gap: 1rem;
+        }
+        
+        .left-panel {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .right-panel {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+        
+        .image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8f9fa;
+            position: relative;
+        }
+        
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .image-info {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .image-info h3 {
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }
+        
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .nav-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+        
+        .nav-btn:hover {
+            background: #2980b9;
+        }
+        
+        .nav-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .counter {
+            font-size: 1.1rem;
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+        
+        .metadata-section {
+            margin-bottom: 2rem;
+        }
+        
+        .metadata-section h3 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #3498db;
+            font-size: 1.3rem;
+        }
+        
+        .metadata-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .metadata-item {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 6px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .metadata-label {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .metadata-value {
+            color: #555;
+            font-size: 1rem;
+        }
+        
+        .prompt-section {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+        
+        .prompt-label {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        
+        .prompt-text {
+            background: white;
+            padding: 0.75rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .risk-tags {
+            background: #e74c3c;
+            color: white;
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+        
+        .risk-tags .metadata-label {
+            color: white;
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #7f8c8d;
+            font-size: 1.2rem;
+        }
+        
+        .error {
+            background: #e74c3c;
+            color: white;
+            padding: 1rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Object Detection Dataset Preview</h1>
+        <div class="subtitle">Image Analysis and Metadata Viewer</div>
+    </div>
+    
+    <div class="container">
+        <div class="left-panel">
+            <div class="image-container" id="imageContainer">
+                <div class="loading">Loading image...</div>
+            </div>
+            <div class="image-info" id="imageInfo">
+                <h3>Image Information</h3>
+                <div id="imageDetails">Loading...</div>
+            </div>
+            <div class="navigation">
+                <button class="nav-btn" id="prevBtn" onclick="previousImage()">← Previous</button>
+                <div class="counter" id="counter">0 / 0</div>
+                <button class="nav-btn" id="nextBtn" onclick="nextImage()">Next →</button>
+            </div>
+        </div>
+        
+        <div class="right-panel" id="rightPanel">
+            <div class="loading">Loading metadata...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = null;
+        
+        async function loadCurrentImage() {
+            try {
+                const response = await fetch('/api/current');
+                if (!response.ok) throw new Error('Failed to load image data');
+                
+                const data = await response.json();
+                currentData = data;
+                displayImage(data);
+                displayMetadata(data);
+                updateNavigation();
+            } catch (error) {
+                console.error('Error loading image:', error);
+                document.getElementById('imageContainer').innerHTML = 
+                    '<div class="error">Error loading image: ' + error.message + '</div>';
+                document.getElementById('rightPanel').innerHTML = 
+                    '<div class="error">Error loading metadata: ' + error.message + '</div>';
+            }
+        }
+        
+        function displayImage(data) {
+            const container = document.getElementById('imageContainer');
+            const info = document.getElementById('imageInfo');
+            
+            container.innerHTML = `<img src="/images/${data.image.filename}" alt="${data.test_case_id}">`;
+            
+            info.innerHTML = `
+                <h3>${data.test_case_id}</h3>
+                <div><strong>Filename:</strong> ${data.image.filename}</div>
+            `;
+        }
+        
+        function displayMetadata(data) {
+            const panel = document.getElementById('rightPanel');
+            
+            panel.innerHTML = `
+                <div class="metadata-section">
+                    <h3>Test Case Information</h3>
+                    <div class="metadata-grid">
+                        <div class="metadata-item">
+                            <div class="metadata-label">Test Case ID</div>
+                            <div class="metadata-value">${data.test_case_id}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Scenario Category</div>
+                            <div class="metadata-value">${data.scenario_category}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Test Subcategory</div>
+                            <div class="metadata-value">${data.test_subcategory}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Property Type</div>
+                            <div class="metadata-value">${data.property_type}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">OD Type Primary</div>
+                            <div class="metadata-value">${data.od_type_primary}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">OD State</div>
+                            <div class="metadata-value">${data.od_state}</div>
+                        </div>
+                        <div class="metadata-item">
+                            <div class="metadata-label">Motion Type</div>
+                            <div class="metadata-value">${data.motion_type}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Risk Assessment</h3>
+                    <div class="risk-tags">
+                        <div class="metadata-label">Risk Tags</div>
+                        <div class="metadata-value">${data.risk_tags}</div>
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Scene Attributes</h3>
+                    <div class="metadata-grid">
+                        ${Object.entries(data.attributes).map(([key, value]) => `
+                            <div class="metadata-item">
+                                <div class="metadata-label">${key}</div>
+                                <div class="metadata-value">${value}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Expected Detection</h3>
+                    <div class="metadata-grid">
+                        ${Object.entries(data.expected_detection).map(([key, value]) => `
+                            <div class="metadata-item">
+                                <div class="metadata-label">${key.replace('_', ' ').toUpperCase()}</div>
+                                <div class="metadata-value">${value ? 'Yes' : 'No'}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Background Prompt</h3>
+                    <div class="prompt-section">
+                        <span class="prompt-label">Scene Description</span>
+                        <div class="prompt-text">${data.background_prompt}</div>
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Generation Prompts</h3>
+                    <div class="prompt-section">
+                        <span class="prompt-label">Positive Prompt</span>
+                        <div class="prompt-text">${data.positive_prompt}</div>
+                    </div>
+                    <div class="prompt-section">
+                        <span class="prompt-label">Negative Prompt</span>
+                        <div class="prompt-text">${data.negative_prompt}</div>
+                    </div>
+                    <div class="prompt-section">
+                        <span class="prompt-label">Composition Guidance</span>
+                        <div class="prompt-text">${data.composition_guidance}</div>
+                    </div>
+                </div>
+                
+                <div class="metadata-section">
+                    <h3>Full Prompt</h3>
+                    <div class="prompt-section">
+                        <span class="prompt-label">Complete Generation Prompt</span>
+                        <div class="prompt-text">${data.prompt}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function updateNavigation() {
+            document.getElementById('counter').textContent = 
+                `${currentData.current_index + 1} / ${currentData.total_count}`;
+            
+            document.getElementById('prevBtn').disabled = currentData.total_count <= 1;
+            document.getElementById('nextBtn').disabled = currentData.total_count <= 1;
+        }
+        
+        async function nextImage() {
+            try {
+                const response = await fetch('/api/next');
+                if (response.ok) {
+                    await loadCurrentImage();
+                }
+            } catch (error) {
+                console.error('Error navigating to next image:', error);
+            }
+        }
+        
+        async function previousImage() {
+            try {
+                const response = await fetch('/api/prev');
+                if (response.ok) {
+                    await loadCurrentImage();
+                }
+            } catch (error) {
+                console.error('Error navigating to previous image:', error);
+            }
+        }
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') {
+                previousImage();
+            } else if (e.key === 'ArrowRight') {
+                nextImage();
+            }
+        });
+        
+        // Load initial data
+        document.addEventListener('DOMContentLoaded', loadCurrentImage);
+    </script>
+</body>
+</html>

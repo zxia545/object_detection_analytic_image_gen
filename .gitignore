@@ -13,3 +13,6 @@
 __pycache__/
 
 !image_generation/gen_images/*
+
+image_preview/downloaded_images/*
+image_preview/huggingface_cache/*
