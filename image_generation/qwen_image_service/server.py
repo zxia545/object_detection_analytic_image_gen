@@ -22,7 +22,7 @@ import random
 # 配置参数
 ###############################################################################
 MODEL_PATHS = ["/root/autodl-tmp/Qwen-Image", "/root/autodl-fs/Qwen-Image"]
-OUTPUT_DIR = "/root/autodl-tmp/output_images"
+DEFAULT_OUTPUT_DIR = "/root/autodl-tmp/output_images"
 MIN_FREE_GB = 5  # 如果可用空间小于10GB则清理
 
 positive_magic = {
@@ -62,23 +62,23 @@ def check_cuda_offload():  # 大于30G显存不开启offload
     total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
     return total_gb < 30
 
-def clean_old_images():
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+def clean_old_images(output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
         return
-    disk = psutil.disk_usage(OUTPUT_DIR)
+    disk = psutil.disk_usage(output_dir)
     freespace_gb = disk.free / (1024 ** 3)
     if freespace_gb < MIN_FREE_GB:
-        files = [(f, os.path.getctime(os.path.join(OUTPUT_DIR, f)), os.path.getsize(os.path.join(OUTPUT_DIR, f))) 
-                 for f in os.listdir(OUTPUT_DIR) if os.path.isfile(os.path.join(OUTPUT_DIR, f))]
+        files = [(f, os.path.getctime(os.path.join(output_dir, f)), os.path.getsize(os.path.join(output_dir, f))) 
+                 for f in os.listdir(output_dir) if os.path.isfile(os.path.join(output_dir, f))]
         files.sort(key=lambda x: (x[2], x[1]), reverse=True)  # 大文件/旧文件优先删
         for f, _, _ in files:
             try:
-                os.remove(os.path.join(OUTPUT_DIR, f))
+                os.remove(os.path.join(output_dir, f))
                 print(f"Cleanup: deleted {f}")
             except:
                 continue
-            disk = psutil.disk_usage(OUTPUT_DIR)
+            disk = psutil.disk_usage(output_dir)
             if disk.free / (1024 ** 3) >= MIN_FREE_GB:
                 break
 
@@ -103,6 +103,7 @@ class GenerateRequest(BaseModel):
     seed: Optional[int] = 42
     language: Optional[str] = "en"
     callback_url: Optional[str] = None
+    output_dir: Optional[str] = None  # 新增：指定输出目录
 
 class GenerateStatusResponse(BaseModel):
     status: str
@@ -118,14 +119,15 @@ class GenerateCaseRequest(BaseModel):
     true_cfg_scale: Optional[float] = 4.0
     seed: Optional[int] = random.randint(0, 100)
     language: Optional[str] = "en"
+    output_dir: Optional[str] = None  # 新增：指定输出目录
 ###############################################################################
 # FastAPI/lifespan
 ###############################################################################
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     model_path = make_sure_model()
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    if not os.path.exists(DEFAULT_OUTPUT_DIR):
+        os.makedirs(DEFAULT_OUTPUT_DIR)
     app.state.model_path = model_path
     yield
     # 可在此释放模型资源
@@ -202,13 +204,13 @@ def _generate(
 
 @app.post("/generate_case")
 async def generate_case(req: GenerateCaseRequest, background_tasks: BackgroundTasks):
-    clean_old_images()
+    clean_old_images(req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR)
     task_id = req.test_case_id  # 直接用 test_case_id 做任务 ID
     task_info = {
         "status": "pending",
         "result_url": None,
         "detail": None,
-        "output_file": f"{OUTPUT_DIR}/{task_id}.png"
+        "output_file": f"{req.output_dir}/{task_id}.png" if req.output_dir else f"{DEFAULT_OUTPUT_DIR}/{task_id}.png"
     }
     async with task_lock:
         tasks[task_id] = task_info
@@ -238,14 +240,14 @@ async def generate_case(req: GenerateCaseRequest, background_tasks: BackgroundTa
 
 @app.post("/generate")
 async def generate_image(req: GenerateRequest, background_tasks: BackgroundTasks):
-    clean_old_images()
+    clean_old_images(req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR)
     task_id = str(uuid.uuid4())
     task_info = {
         "status": "pending",
         "result_url": None,
         "detail": None,
         "callback_url": req.callback_url,
-        "output_file": f"{OUTPUT_DIR}/{task_id}.png"
+        "output_file": f"{req.output_dir}/{task_id}.png" if req.output_dir else f"{DEFAULT_OUTPUT_DIR}/{task_id}.png"
     }
     async with task_lock:
         tasks[task_id] = task_info
@@ -301,9 +303,19 @@ async def check_status(task_id: str):
 ###############################################################################
 @app.get("/result/{filename}")
 async def get_result(filename: str):
-    path = os.path.join(OUTPUT_DIR, filename)
+    # 首先尝试从默认目录查找
+    path = os.path.join(DEFAULT_OUTPUT_DIR, filename)
     if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Image not found")
+        # 如果默认目录没有，尝试从任务信息中查找
+        async with task_lock:
+            for task_info in tasks.values():
+                if task_info.get("output_file") and os.path.basename(task_info["output_file"]) == filename:
+                    path = task_info["output_file"]
+                    break
+        
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="Image not found")
+    
     return FileResponse(path, media_type="image/png")
 
 ###############################################################################

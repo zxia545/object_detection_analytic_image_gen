@@ -27,7 +27,8 @@ def submit_case(case):
         "num_inference_steps": 30,
         "true_cfg_scale": 4.0,
         "seed": case.get("seed", random.randint(0, 100)),
-        "language": "en"
+        "language": "en",
+        "output_dir": OUT_DIR  # 新增：指定输出目录
     }
     r = requests.post(f"{SERVER_URL}/generate_case", json=payload)
     r.raise_for_status()
@@ -39,12 +40,12 @@ def wait_for_result(task_id):
         r.raise_for_status()
         data = r.json()
         if data["status"] == "done":
-            img_url = f"{SERVER_URL}{data['result_url']}"
-            img_data = requests.get(img_url)
+            # 图片已经直接保存到指定目录，不需要再下载
             img_path = os.path.join(OUT_DIR, f"{task_id}.png")
-            with open(img_path, "wb") as f:
-                f.write(img_data.content)
-            print(f"✅ Saved {img_path}")
+            if os.path.exists(img_path):
+                print(f"✅ Image saved to {img_path}")
+            else:
+                print(f"⚠️  Image generation completed but file not found at {img_path}")
             break
         elif data["status"] == "failed":
             print(f"❌ Failed {task_id}: {data.get('detail')}")
