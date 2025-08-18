@@ -19,6 +19,10 @@ def submit_case(case):
         print(f"⏭️  Skipping {task_id} - image already exists: {img_path}")
         return None
     
+    # 将相对路径转换为绝对路径
+    abs_output_dir = os.path.abspath(OUT_DIR)
+    print(f"📁 Using output directory: {abs_output_dir}")
+    
     payload = {
         "test_case_id": case["test_case_id"],
         "prompt": case["prompt"],
@@ -28,7 +32,7 @@ def submit_case(case):
         "true_cfg_scale": 4.0,
         "seed": case.get("seed", random.randint(0, 100)),
         "language": "en",
-        "output_dir": OUT_DIR  # 新增：指定输出目录
+        "output_dir": abs_output_dir  # 使用绝对路径
     }
     r = requests.post(f"{SERVER_URL}/generate_case", json=payload)
     r.raise_for_status()
