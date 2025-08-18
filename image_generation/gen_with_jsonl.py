@@ -46,11 +46,14 @@ def wait_for_result(task_id):
                 print(f"✅ Image saved to {img_path}")
             else:
                 print(f"⚠️  Image generation completed but file not found at {img_path}")
+                print(f"   Checking if directory exists: {os.path.exists(OUT_DIR)}")
+                print(f"   Directory contents: {os.listdir(OUT_DIR) if os.path.exists(OUT_DIR) else 'N/A'}")
             break
         elif data["status"] == "failed":
             print(f"❌ Failed {task_id}: {data.get('detail')}")
             break
         else:
+            print(f"⏳ Status: {data['status']} for {task_id}")
             time.sleep(1)
 
 if __name__ == "__main__":

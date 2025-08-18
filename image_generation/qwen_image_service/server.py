@@ -204,13 +204,20 @@ def _generate(
 
 @app.post("/generate_case")
 async def generate_case(req: GenerateCaseRequest, background_tasks: BackgroundTasks):
-    clean_old_images(req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR)
+    # 确定输出目录和文件路径
+    output_dir = req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR
+    output_file = f"{output_dir}/{req.test_case_id}.png"
+    
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    clean_old_images(output_dir)
     task_id = req.test_case_id  # 直接用 test_case_id 做任务 ID
     task_info = {
         "status": "pending",
         "result_url": None,
         "detail": None,
-        "output_file": f"{req.output_dir}/{task_id}.png" if req.output_dir else f"{DEFAULT_OUTPUT_DIR}/{task_id}.png"
+        "output_file": output_file
     }
     async with task_lock:
         tasks[task_id] = task_info
@@ -221,16 +228,19 @@ async def generate_case(req: GenerateCaseRequest, background_tasks: BackgroundTa
             async with pipe_lock:
                 async with task_lock:
                     tasks[task_id]["status"] = "running"
+                print(f"🔄 Generating image for {task_id} to {output_file}")
                 await asyncio.get_event_loop().run_in_executor(
                     None, _generate,
                     req.prompt, req.negative_prompt, req.aspect_ratio, req.num_inference_steps,
                     req.true_cfg_scale, req.seed, req.language,
-                    task_info["output_file"], cpu_offload, app.state.model_path
+                    output_file, cpu_offload, app.state.model_path
                 )
+                print(f"✅ Image generated for {task_id} at {output_file}")
             async with task_lock:
                 tasks[task_id]["status"] = "done"
-                tasks[task_id]["result_url"] = f"/result/{task_id}.png"
+                tasks[task_id]["result_url"] = f"/result/{req.test_case_id}.png"
         except Exception as e:
+            print(f"❌ Error generating image for {task_id}: {e}")
             async with task_lock:
                 tasks[task_id]["status"] = "failed"
                 tasks[task_id]["detail"] = str(e)
@@ -240,14 +250,22 @@ async def generate_case(req: GenerateCaseRequest, background_tasks: BackgroundTa
 
 @app.post("/generate")
 async def generate_image(req: GenerateRequest, background_tasks: BackgroundTasks):
-    clean_old_images(req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR)
+    # 确定输出目录和文件路径
+    output_dir = req.output_dir if req.output_dir else DEFAULT_OUTPUT_DIR
+    
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    clean_old_images(output_dir)
     task_id = str(uuid.uuid4())
+    output_file = f"{output_dir}/{task_id}.png"
+    
     task_info = {
         "status": "pending",
         "result_url": None,
         "detail": None,
         "callback_url": req.callback_url,
-        "output_file": f"{req.output_dir}/{task_id}.png" if req.output_dir else f"{DEFAULT_OUTPUT_DIR}/{task_id}.png"
+        "output_file": output_file
     }
     async with task_lock:
         tasks[task_id] = task_info
@@ -261,12 +279,14 @@ async def generate_image(req: GenerateRequest, background_tasks: BackgroundTasks
             async with pipe_lock:
                 async with task_lock:
                     tasks[task_id]["status"] = "running"
+                print(f"🔄 Generating image for {task_id} to {output_file}")
                 await asyncio.get_event_loop().run_in_executor(
                     None, _generate,
                     req.prompt, req.negative_prompt, req.aspect_ratio, req.num_inference_steps,
                     req.true_cfg_scale, req.seed, req.language,
-                    task_info["output_file"], cpu_offload, app.state.model_path
+                    output_file, cpu_offload, app.state.model_path
                 )
+                print(f"✅ Image generated for {task_id} at {output_file}")
             async with task_lock:
                 tasks[task_id]["status"] = "done"
                 tasks[task_id]["result_url"] = f"/result/{task_id}.png"
@@ -277,6 +297,7 @@ async def generate_image(req: GenerateRequest, background_tasks: BackgroundTasks
                 except Exception as e:
                     print(f"Callback failed: {e}")
         except Exception as e:
+            print(f"❌ Error generating image for {task_id}: {e}")
             async with task_lock:
                 tasks[task_id]["status"] = "failed"
                 tasks[task_id]["detail"] = str(e)
