@@ -1,0 +1,4 @@
+{"test_case_id": "OD-EDGE-08255", "expected_object_type": "animal", "od_type_primary": "animal", "category": "animal", "start_time": "2025-08-28T13:52:10.687497", "end_time": "2025-08-28T13:52:40.687784", "duration_seconds": 30.000287}
+{"test_case_id": "OD-EDGE-08253", "expected_object_type": "person", "od_type_primary": "person", "category": "person", "start_time": "2025-08-28T13:52:40.687904", "end_time": "2025-08-28T13:53:10.688303", "duration_seconds": 30.000399}
+{"test_case_id": "OD-EDGE-08041", "expected_object_type": "vehicle", "od_type_primary": "vehicle", "category": "vehicle", "start_time": "2025-08-28T13:53:10.688507", "end_time": "2025-08-28T13:53:40.688775", "duration_seconds": 30.000268}
+{"test_case_id": "OD-EDGE-08663", "expected_object_type": "package", "od_type_primary": "package", "category": "package", "start_time": "2025-08-28T13:53:40.688876", "end_time": "2025-08-28T13:54:10.689155", "duration_seconds": 30.000279}
