@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Player - OD Testing</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2c3e50;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 1rem;
+            background: rgba(0,0,0,0.8);
+            padding: 1rem;
+            border-radius: 10px;
+            z-index: 1000;
+        }
+
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+        }
+
+        .btn.stop {
+            background: #e74c3c;
+        }
+
+        .btn.stop:hover {
+            background: #c0392b;
+        }
+
+        .status {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 1rem;
+            border-radius: 10px;
+            font-size: 0.9rem;
+        }
+
+        .image-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .image-container img, .image-container video {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            animation: none;
+        }
+
+        .image-container.moving img {
+            animation: moveImage 60s linear infinite;
+        }
+
+        .image-info {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 1rem;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            max-width: 300px;
+        }
+
+        .timer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            color: rgba(255,255,255,0.3);
+            font-weight: bold;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        @keyframes moveImage {
+            0% {
+                transform: translate(0, 0) scale(1);
+            }
+            25% {
+                transform: translate(20px, -20px) scale(1.05);
+            }
+            50% {
+                transform: translate(-20px, 20px) scale(0.95);
+            }
+            75% {
+                transform: translate(15px, 15px) scale(1.02);
+            }
+            100% {
+                transform: translate(0, 0) scale(1);
+            }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Object Detection Image Player</h1>
+        <div class="subtitle">Automatic playback with motion effects for OD testing</div>
+    </div>
+
+    <div class="status">
+        <div>Status: <span id="statusText">Stopped</span></div>
+        <div>Current: <span id="currentImage">-</span></div>
+        <div>Progress: <span id="progress">0 / 0</span></div>
+        <div>History: <span id="historyCount">0</span> records</div>
+    </div>
+
+    <div class="image-info">
+        <div><strong>Test Case ID:</strong> <span id="testCaseId">-</span></div>
+        <div><strong>OD Type:</strong> <span id="odType">-</span></div>
+        <div><strong>Category:</strong> <span id="category">-</span></div>
+        <div><strong>Start Time:</strong> <span id="startTime">-</span></div>
+    </div>
+
+    <div class="timer" id="timer">60</div>
+
+    <div class="image-container" id="imageContainer">
+        <div style="color: rgba(255,255,255,0.5); font-size: 1.5rem;">Waiting for playback to start...</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="startBtn" onclick="startPlayback()">Start Playback</button>
+        <button class="btn stop" id="stopBtn" onclick="stopPlayback()">Stop Playback</button>
+        <button class="btn" id="saveBtn" onclick="saveHistory()">Save History</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let countdownInterval = null;
+        let timeLeft = 60;
+
+        socket.on('image_update', function(data) {
+            displayImage(data.image_data, data.start_time);
+            updateInfo(data);
+            startCountdown();
+        });
+
+        function startPlayback() {
+            fetch('/api/start')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('statusText').textContent = 'Playing';
+                        document.getElementById('startBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                    } else {
+                        alert(data.message);
+                    }
+                });
+        }
+
+        function stopPlayback() {
+            fetch('/api/stop')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('statusText').textContent = 'Stopped';
+                        document.getElementById('startBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        stopCountdown();
+                    } else {
+                        alert(data.message);
+                    }
+                });
+        }
+
+        function saveHistory() {
+            const outputFile = prompt('Enter output filename:', 'playback_history.jsonl');
+            if (outputFile) {
+                fetch(`/api/save_history?output=${outputFile}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(data.message);
+                        } else {
+                            alert('Error: ' + data.message);
+                        }
+                    });
+            }
+        }
+
+        function displayImage(imageData, startTime) {
+            const container = document.getElementById('imageContainer');
+
+            // Clear previous content
+            container.innerHTML = '';
+
+            const imagePath = imageData.image_path;
+            const isVideo = imageData.is_video;
+            const isGif = imageData.is_gif;
+
+            if (isVideo) {
+                const video = document.createElement('video');
+                video.src = `/images/${imagePath}`;
+                video.controls = false;
+                video.autoplay = true;
+                video.loop = true;
+                video.style.maxWidth = '90%';
+                video.style.maxHeight = '90%';
+                video.style.objectFit = 'contain';
+                video.style.borderRadius = '8px';
+                video.style.boxShadow = '0 0 50px rgba(0,0,0,0.5)';
+                container.appendChild(video);
+            } else {
+                const img = document.createElement('img');
+                img.src = `/images/${imagePath}`;
+                img.alt = imageData.test_case_id;
+
+                // Add motion effect for static images (not GIF)
+                if (!isGif) {
+                    container.classList.add('moving');
+                    setTimeout(() => {
+                        container.classList.remove('moving');
+                    }, 60000); // Remove after 60 seconds
+                }
+
+                container.appendChild(img);
+            }
+        }
+
+        function updateInfo(data) {
+            document.getElementById('testCaseId').textContent = data.image_data.test_case_id;
+            document.getElementById('odType').textContent = data.image_data.od_type_primary;
+            document.getElementById('category').textContent = data.image_data.category;
+            document.getElementById('startTime').textContent = new Date(data.start_time).toLocaleTimeString();
+            document.getElementById('progress').textContent = `${data.index + 1} / ${data.total}`;
+        }
+
+        function startCountdown(duration = 60) {
+            stopCountdown();
+            timeLeft = duration;
+
+            countdownInterval = setInterval(() => {
+                timeLeft--;
+                const timerElement = document.getElementById('timer');
+                if (timerElement) {
+                    timerElement.textContent = timeLeft;
+                }
+
+                if (timeLeft <= 0) {
+                    stopCountdown();
+                }
+            }, 1000);
+        }
+
+        function stopCountdown() {
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+            document.getElementById('timer').textContent = '60';
+        }
+
+        function updateStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('historyCount').textContent = data.playback_history_count;
+                        document.getElementById('currentImage').textContent =
+                            data.current_image ? data.current_image.test_case_id : '-';
+                    }
+                });
+        }
+
+        // Update status every 5 seconds
+        setInterval(updateStatus, 5000);
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus();
+        });
+    </script>
+</body>
+</html>

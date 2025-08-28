@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Player - Big Screen</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            cursor: default;
+        }
+
+        .image-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            overflow: hidden;
+        }
+
+        .image-container img, .image-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            animation: none;
+        }
+
+        .image-container.moving img {
+            animation: enhancedMotion 60s ease-in-out infinite;
+        }
+
+        .loading {
+            color: rgba(255,255,255,0.3);
+            font-size: 2rem;
+            font-family: Arial, sans-serif;
+            cursor: pointer;
+            padding: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .loading:hover {
+            color: rgba(255,255,255,0.7);
+            border-color: rgba(255,255,255,0.7);
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Enhanced motion effects with dramatic movement */
+        @keyframes enhancedMotion {
+            0% {
+                transform: translate(0, 0) scale(1) rotate(0deg);
+                filter: brightness(1) contrast(1) saturate(1);
+            }
+            8% {
+                transform: translate(60px, -45px) scale(1.15) rotate(1deg);
+                filter: brightness(1.2) contrast(1.1) saturate(1.1);
+            }
+            16% {
+                transform: translate(-70px, 35px) scale(0.88) rotate(-1.5deg);
+                filter: brightness(0.85) contrast(0.95) saturate(0.9);
+            }
+            25% {
+                transform: translate(50px, 60px) scale(1.12) rotate(2deg);
+                filter: brightness(1.15) contrast(1.08) saturate(1.05);
+            }
+            33% {
+                transform: translate(-45px, -70px) scale(0.92) rotate(-2.5deg);
+                filter: brightness(0.9) contrast(0.92) saturate(0.95);
+            }
+            41% {
+                transform: translate(80px, 20px) scale(1.18) rotate(1.8deg);
+                filter: brightness(1.25) contrast(1.15) saturate(1.2);
+            }
+            50% {
+                transform: translate(-60px, 80px) scale(0.85) rotate(-3deg);
+                filter: brightness(0.8) contrast(0.88) saturate(0.85);
+            }
+            58% {
+                transform: translate(35px, -80px) scale(1.08) rotate(0.5deg);
+                filter: brightness(1.1) contrast(1.05) saturate(1.08);
+            }
+            66% {
+                transform: translate(-80px, -30px) scale(0.95) rotate(-1.8deg);
+                filter: brightness(0.95) contrast(0.98) saturate(0.92);
+            }
+            75% {
+                transform: translate(70px, 50px) scale(1.14) rotate(2.5deg);
+                filter: brightness(1.2) contrast(1.12) saturate(1.15);
+            }
+            83% {
+                transform: translate(-55px, 70px) scale(0.89) rotate(-2.2deg);
+                filter: brightness(0.88) contrast(0.9) saturate(0.88);
+            }
+            91% {
+                transform: translate(65px, -55px) scale(1.11) rotate(1.5deg);
+                filter: brightness(1.18) contrast(1.1) saturate(1.12);
+            }
+            100% {
+                transform: translate(0, 0) scale(1) rotate(0deg);
+                filter: brightness(1) contrast(1) saturate(1);
+            }
+        }
+
+        /* Additional dramatic effect */
+        .image-container.intense img {
+            animation: enhancedMotion 60s ease-in-out infinite,
+                      subtleGlow 4s ease-in-out infinite alternate;
+        }
+
+        @keyframes subtleGlow {
+            from {
+                box-shadow: 0 0 20px rgba(255,255,255,0.1);
+            }
+            to {
+                box-shadow: 0 0 40px rgba(255,255,255,0.3);
+            }
+        }
+
+        /* Hide any potential text or UI elements */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Ensure fullscreen display */
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="image-container" id="imageContainer">
+        <div class="loading" onclick="manualStart()" title="Click to start playback manually">Loading... Click to start</div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        socket.on('connect', function() {
+            console.log('WebSocket connected');
+        });
+
+        socket.on('disconnect', function() {
+            console.log('WebSocket disconnected');
+        });
+
+        socket.on('connect_error', function(error) {
+            console.error('WebSocket connection error:', error);
+        });
+
+        socket.on('image_update', function(data) {
+            console.log('Received image_update:', data);
+            displayImage(data.image_data, data.duration_seconds || 60, data.motion_intensity || 100);
+            startCountdown(data.duration_seconds || 60);
+        });
+
+        socket.on('playback_complete', function(data) {
+            console.log('Playback completed:', data);
+            showCompletionMessage(data);
+        });
+
+        function displayImage(imageData, durationSeconds, motionIntensity) {
+            const container = document.getElementById('imageContainer');
+
+            // Clear previous content
+            container.innerHTML = '';
+
+            const imagePath = imageData.image_path;
+            const isVideo = imageData.is_video;
+            const isGif = imageData.is_gif;
+
+            console.log('Displaying image:', imageData.test_case_id, imagePath);
+
+            if (isVideo) {
+                // For videos, just play them without motion effects
+                const video = document.createElement('video');
+                // imagePath is already in the correct format for Flask routing
+                video.src = `/images/${encodeURIComponent(imagePath)}`;
+                video.controls = false;
+                video.autoplay = true;
+                video.loop = true;
+                video.muted = true; // Mute to allow autoplay
+
+                // Add error handling
+                video.onerror = function() {
+                    console.error('Video failed to load:', imagePath);
+                    // Show error message
+                    container.innerHTML = '<div style="color: red; font-size: 2rem;">Video Error: ' + imageData.test_case_id + '</div>';
+                };
+
+                container.appendChild(video);
+            } else {
+                // For static images
+                const img = document.createElement('img');
+                // imagePath is already in the correct format for Flask routing
+                img.src = `/images/${encodeURIComponent(imagePath)}`;
+                img.alt = imageData.test_case_id;
+
+                // Add error handling
+                img.onload = function() {
+                    console.log('Image loaded successfully:', imagePath);
+
+                    // Add enhanced motion effect for all static content (not video)
+                    if (!isVideo && motionIntensity > 0) {
+                        console.log(`[MOTION] Applying motion effect to ${imageData.test_case_id}: intensity=${motionIntensity}, duration=${durationSeconds}s, isVideo=${isVideo}, isGif=${isGif}`);
+
+                        // Add visual indicator that motion is active
+                        const motionIndicator = document.createElement('div');
+                        motionIndicator.id = 'motion-indicator';
+                        motionIndicator.style.cssText = `
+                            position: fixed;
+                            top: 10px;
+                            right: 10px;
+                            background: #ff0000;
+                            color: white;
+                            padding: 5px 10px;
+                            border-radius: 5px;
+                            font-size: 12px;
+                            z-index: 10000;
+                        `;
+                        motionIndicator.textContent = `MOTION: ${motionIntensity}%`;
+
+                        // Remove existing indicator
+                        const existing = document.getElementById('motion-indicator');
+                        if (existing) existing.remove();
+
+                        document.body.appendChild(motionIndicator);
+
+                        // Remove any existing motion styles
+                        container.classList.remove('moving', 'intense');
+                        container.style.animation = '';
+                        container.style.transform = '';
+
+                        // Apply simple and direct motion effect
+                        applySimpleMotionEffect(container, motionIntensity, durationSeconds);
+
+                        // Reset animation after playback duration
+                        setTimeout(() => {
+                            console.log(`[MOTION] Resetting motion for ${imageData.test_case_id}`);
+                            container.classList.remove('moving', 'intense');
+                            container.style.animation = '';
+                            container.style.transform = '';
+
+                            // Remove motion indicator
+                            const indicator = document.getElementById('motion-indicator');
+                            if (indicator) indicator.remove();
+                        }, durationSeconds * 1000);
+                    } else {
+                        console.log(`[MOTION] Skipping motion effect for ${imageData.test_case_id}: intensity=${motionIntensity}, isVideo=${isVideo}, isGif=${isGif}`);
+                    }
+                };
+
+                img.onerror = function() {
+                    console.error('Image failed to load:', imagePath);
+                    // Show error message and try to continue to next image
+                    container.innerHTML = '<div style="color: red; font-size: 3rem; text-align: center;">Image Error: ' + imageData.test_case_id + '<br><small>Continuing to next image...</small></div>';
+
+                    // Auto-advance to next image after 3 seconds
+                    setTimeout(() => {
+                        console.log('Auto-advancing due to image error');
+                        // Request next image from server
+                        fetch('/api/next')
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    console.log('Successfully advanced to next image');
+                                }
+                            })
+                            .catch(error => {
+                                console.error('Failed to advance:', error);
+                            });
+                    }, 3000);
+                };
+
+                container.appendChild(img);
+            }
+        }
+
+        // Manual start function
+        function manualStart() {
+            console.log('Manual start triggered');
+            fetch('/api/start')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('Manually started playback for big screen');
+                        document.querySelector('.loading').textContent = 'Starting playback...';
+                    } else {
+                        console.error('Failed to start:', data.message);
+                        alert('Failed to start: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting:', error);
+                    alert('Error starting playback: ' + error.message);
+                });
+        }
+
+        function showCompletionMessage(data) {
+            const container = document.getElementById('imageContainer');
+            container.innerHTML = `
+                <div style="
+                    color: #00ff00;
+                    font-size: 3rem;
+                    text-align: center;
+                    padding: 2rem;
+                    border: 4px solid #00ff00;
+                    border-radius: 20px;
+                    background: rgba(0,0,0,0.8);
+                ">
+                    <div style="font-size: 4rem; margin-bottom: 1rem;">🎉</div>
+                    <div style="margin-bottom: 1rem;">Playback Complete!</div>
+                    <div style="font-size: 1.5rem; margin-bottom: 2rem;">
+                        ${data.total_images} images played<br>
+                        Total duration: ${Math.round(data.total_duration)}s
+                    </div>
+                    <button onclick="downloadHistory()" style="
+                        background: #00ff00;
+                        color: black;
+                        border: none;
+                        padding: 1rem 2rem;
+                        font-size: 1.5rem;
+                        border-radius: 10px;
+                        cursor: pointer;
+                        font-weight: bold;
+                    ">📥 Download Results</button>
+                </div>
+            `;
+        }
+
+        function downloadHistory() {
+            // Create download link
+            const link = document.createElement('a');
+            link.href = '/api/download';
+            link.download = 'playback_history.jsonl';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function applySimpleMotionEffect(container, intensity, durationSeconds) {
+            console.log(`[MOTION] Applying motion effect: intensity=${intensity}%, duration=${durationSeconds}s`);
+
+            const factor = intensity / 100;
+            const maxTranslate = 80 * factor; // 80px max movement - more natural
+            const stepInterval = (durationSeconds * 0.4 * 1000) / 10; // 10 steps in motion phase
+
+            // Phase 1: Ensure static (0-20%)
+            container.style.transform = 'translate(0, 0) scale(1) rotate(0deg)';
+            container.style.transition = 'transform 0.5s ease-out';
+
+            // Phase 2: Motion (20-60%)
+            setTimeout(() => {
+                console.log(`[MOTION] Starting motion phase with ${maxTranslate}px amplitude`);
+
+                // Natural motion sequence
+                const motions = [
+                    `translate(${maxTranslate * 0.6}px, ${-maxTranslate * 0.4}px) scale(1.15) rotate(3deg)`,
+                    `translate(${-maxTranslate * 0.8}px, ${maxTranslate * 0.5}px) scale(0.92) rotate(-6deg)`,
+                    `translate(${maxTranslate * 0.5}px, ${maxTranslate * 0.8}px) scale(1.22) rotate(8deg)`,
+                    `translate(${-maxTranslate * 0.7}px, ${-maxTranslate * 0.6}px) scale(0.88) rotate(-9deg)`,
+                    `translate(${maxTranslate * 0.8}px, ${maxTranslate * 0.3}px) scale(1.12) rotate(5deg)`,
+                    `translate(${-maxTranslate * 0.5}px, ${-maxTranslate * 0.8}px) scale(0.95) rotate(-7deg)`,
+                    `translate(${maxTranslate * 0.4}px, ${maxTranslate * 0.7}px) scale(1.18) rotate(9deg)`,
+                    `translate(0, 0) scale(1) rotate(0deg)` // Back to center
+                ];
+
+                motions.forEach((motion, index) => {
+                    setTimeout(() => {
+                        console.log(`[MOTION] Step ${index + 1}: ${motion}`);
+                        container.style.transform = motion;
+                    }, index * 400); // 400ms between each step - slower pace
+                });
+
+            }, durationSeconds * 0.2 * 1000);
+
+            // Phase 3: Back to static (60%+)
+            setTimeout(() => {
+                console.log(`[MOTION] Back to static`);
+                container.style.transition = 'transform 1.5s ease-out';
+                container.style.transform = 'translate(0, 0) scale(1) rotate(0deg)';
+            }, durationSeconds * 0.6 * 1000);
+        }
+
+
+
+        // Auto-start playback when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Page loaded, attempting to start playback...');
+
+            // Add a small delay to ensure WebSocket is ready
+            setTimeout(() => {
+                fetch('/api/start')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            console.log('Auto-started playback for big screen');
+                        } else {
+                            console.error('Failed to auto-start:', data.message);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error auto-starting:', error);
+                    });
+            }, 1000); // Wait 1 second for WebSocket to connect
+        });
+    </script>
+</body>
+</html>
