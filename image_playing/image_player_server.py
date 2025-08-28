@@ -13,6 +13,145 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 
+def test_gif_detection():
+    """Test function to verify GIF animation detection"""
+    import os
+    import glob
+
+    print("[TEST] Testing GIF animation detection...")
+
+    # Find all GIF files in the categorized_images_test directory
+    test_dir = Path("/home/zxia545/_Code/tony_folder/object_detection_analytic_image_gen/categorized_images_test")
+    if not test_dir.exists():
+        print("[TEST] Test directory not found, skipping...")
+        return
+
+    gif_files = []
+    for root, dirs, files in os.walk(test_dir):
+        for file in files:
+            if file.lower().endswith('.gif'):
+                gif_files.append(Path(root) / file)
+
+    print(f"[TEST] Found {len(gif_files)} GIF files to test")
+
+    for gif_file in gif_files[:5]:  # Test first 5 GIFs
+        is_animated = check_gif_animated(gif_file)
+        print(f"[TEST] {gif_file.name}: {'ANIMATED' if is_animated else 'STATIC'}")
+
+def check_gif_animated(gif_path):
+    """
+    Check if a GIF file is actually animated by reading its header.
+    Returns True if animated, False if static.
+    """
+    try:
+        with open(gif_path, 'rb') as f:
+            # Read GIF header (first 10 bytes)
+            header = f.read(10)
+            if len(header) < 10:
+                return False
+
+            # Check GIF signature
+            if not header.startswith(b'GIF87a') and not header.startswith(b'GIF89a'):
+                return False
+
+            # Read logical screen descriptor (next 7 bytes)
+            f.read(7)
+
+            # Track animation indicators
+            has_graphics_control = False
+            has_netscape_extension = False
+            image_descriptor_count = 0
+            has_comment_extension = False
+            has_plain_text_extension = False
+
+            # Look for animation indicators
+            while True:
+                block = f.read(1)
+                if not block:
+                    break
+
+                if block == b'\x21':  # Extension introducer
+                    extension_type = f.read(1)
+                    if extension_type == b'\xf9':  # Graphic Control Extension (indicates animation)
+                        has_graphics_control = True
+                        # Skip the extension data (6 bytes)
+                        f.read(6)
+                    elif extension_type == b'\xff':  # Application Extension
+                        # Check for NETSCAPE 2.0 (animation control)
+                        size = f.read(1)
+                        if size and ord(size) >= 11:
+                            app_data = f.read(11)
+                            if b'NETSCAPE' in app_data:
+                                has_netscape_extension = True
+                        # Skip the rest of this extension
+                        while True:
+                            size = f.read(1)
+                            if size == b'\x00':
+                                break
+                            f.read(ord(size))
+                    elif extension_type == b'\xfe':  # Comment Extension
+                        has_comment_extension = True
+                        # Skip comment data
+                        while True:
+                            size = f.read(1)
+                            if size == b'\x00':
+                                break
+                            f.read(ord(size))
+                    elif extension_type == b'\x01':  # Plain Text Extension
+                        has_plain_text_extension = True
+                        # Skip plain text data
+                        while True:
+                            size = f.read(1)
+                            if size == b'\x00':
+                                break
+                            f.read(ord(size))
+                    else:
+                        # Skip other extensions
+                        while True:
+                            size = f.read(1)
+                            if size == b'\x00':
+                                break
+                            f.read(ord(size))
+                elif block == b'\x2c':  # Image descriptor
+                    image_descriptor_count += 1
+                    # Skip image descriptor (9 bytes)
+                    f.read(9)
+                    # Skip image data (variable length)
+                    while True:
+                        size = f.read(1)
+                        if size == b'\x00':
+                            break
+                        f.read(ord(size))
+                elif block == b'\x3b':  # Trailer (end of GIF)
+                    break
+
+            # Determine if animated with improved logic:
+            # - Multiple frames (> 1 image descriptor) = animated
+            # - Has graphics control extensions = animated
+            # - Has NETSCAPE application extension = animated
+            # - Single frame with no animation extensions = static
+            is_animated = False
+
+            if image_descriptor_count > 1:
+                is_animated = True  # Multiple frames = animated
+            elif has_graphics_control:
+                is_animated = True  # Has animation timing control = animated
+            elif has_netscape_extension:
+                is_animated = True  # Has animation application extension = animated
+            elif image_descriptor_count == 1 and not has_graphics_control and not has_netscape_extension:
+                is_animated = False  # Single frame, no animation extensions = static
+            else:
+                # Conservative approach: if unsure, assume animated
+                is_animated = True
+
+            print(f"[GIF-CHECK] {gif_path.name}: frames={image_descriptor_count}, graphics_control={has_graphics_control}, netscape={has_netscape_extension}, comment={has_comment_extension}, plain_text={has_plain_text_extension}, animated={is_animated}")
+
+            return is_animated
+
+    except Exception as e:
+        print(f"[DEBUG] Error checking GIF animation for {gif_path}: {e}")
+        return True  # Assume animated on error to be safe
+
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -41,78 +180,55 @@ class ImagePlayer:
 
         # Define category order (can be customized)
         category_order = ['animal', 'person', 'vehicle', 'package']
+        image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.mp4', '.avi', '.mov', '.webm', '.mkv']
 
         for category in category_order:
             category_path = self.categorized_images_path / category
             if not category_path.exists():
+                print(f"[DEBUG] Category path does not exist: {category_path}")
                 continue
 
-            images_path = category_path / "images"
-            jsonl_file = category_path / f"{category}_dataset.jsonl"
+            print(f"[DEBUG] Processing category: {category}")
 
-            if not images_path.exists() or not jsonl_file.exists():
-                continue
+            # Search for all image files in the category folder and ALL its subfolders recursively
+            for root, dirs, files in os.walk(category_path):
+                root_path = Path(root)
+                print(f"[DEBUG] Scanning directory: {root_path}")
 
-            # Load JSONL data
-            try:
-                with open(jsonl_file, 'r', encoding='utf-8') as f:
-                    for line_num, line in enumerate(f, 1):
-                        line = line.strip()
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                test_case_id = data.get('test_case_id')
-                                od_type_primary = data.get('od_type_primary', category)
+                for file in files:
+                    if any(file.lower().endswith(ext) for ext in image_extensions):
+                        image_file = root_path / file
+                        print(f"[DEBUG] Found image file: {image_file}")
 
-                                if test_case_id:
-                                    # Find corresponding image file (search recursively in subfolders)
-                                    image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.mp4', '.avi', '.mov', '.webm', '.mkv']
-                                    image_file = None
+                        # Extract test_case_id from filename (everything before first dot or space)
+                        # This assumes filenames start with test case ID
+                        test_case_id = file.split('.')[0].split(' ')[0]
 
-                                    # First search in the images subfolder
-                                    images_subfolder = images_path / "images"
-                                    if images_subfolder.exists():
-                                        for ext in image_extensions:
-                                            potential_file = images_subfolder / f"{test_case_id}{ext}"
-                                            if potential_file.exists():
-                                                image_file = potential_file
-                                                break
+                        # Create relative path for Flask serving - preserve full directory structure
+                        try:
+                            relative_path = image_file.relative_to(category_path)
+                            relative_path_str = f"{category}/{relative_path}"
+                        except ValueError:
+                            # Fallback for files outside the expected structure
+                            relative_path_str = f"{category}/{image_file.name}"
 
-                                    # If not found in images subfolder, search recursively in the category folder
-                                    if not image_file:
-                                        for root, dirs, files in os.walk(images_path):
-                                            for file in files:
-                                                if file.startswith(test_case_id) and any(file.endswith(ext) for ext in image_extensions):
-                                                    image_file = Path(root) / file
-                                                    break
-                                            if image_file:
-                                                break
+                        # Check if GIF is actually animated
+                        is_actually_animated = False
+                        if image_file.suffix.lower() == '.gif':
+                            is_actually_animated = check_gif_animated(image_file)
+                            print(f"[DEBUG] GIF animation check for {image_file.name}: {is_actually_animated}")
 
-                                    if image_file:
-                                        # Create relative path for Flask serving
-                                        # Calculate relative path from the category folder
-                                        try:
-                                            relative_path = image_file.relative_to(self.categorized_images_path / category)
-                                            relative_path_str = f"{category}/{relative_path}"
-                                        except ValueError:
-                                            # Fallback for files outside the expected structure
-                                            relative_path_str = f"{category}/images/{image_file.name}"
-
-                                        image_info = {
-                                            'test_case_id': test_case_id,
-                                            'od_type_primary': od_type_primary,
-                                            'image_path': relative_path_str,
-                                            'category': category,
-                                            'is_video': image_file.suffix.lower() in ['.mp4', '.avi', '.mov', '.webm', '.mkv'],
-                                            'is_gif': image_file.suffix.lower() == '.gif'
-                                        }
-                                        self.current_playlist.append(image_info)
-                                        print(f"[DEBUG] Added to playlist: {test_case_id} -> {relative_path}")
-                            except json.JSONDecodeError:
-                                continue
-            except Exception as e:
-                print(f"Error loading {jsonl_file}: {e}")
-                continue
+                        image_info = {
+                            'test_case_id': test_case_id,
+                            'od_type_primary': category,  # Use category name as the primary object type
+                            'image_path': relative_path_str,
+                            'category': category,
+                            'is_video': image_file.suffix.lower() in ['.mp4', '.avi', '.mov', '.webm', '.mkv'],
+                            'is_gif': image_file.suffix.lower() == '.gif',
+                            'is_animated_gif': is_actually_animated
+                        }
+                        self.current_playlist.append(image_info)
+                        print(f"[DEBUG] Added to playlist: {test_case_id} -> {relative_path_str} (from {root_path})")
 
         print(f"Loaded {len(self.current_playlist)} images for playback")
 
@@ -216,7 +332,8 @@ class ImagePlayer:
 
     def save_playback_history(self, output_file):
         """Save playback history to JSONL file"""
-        output_path = Path(output_file)
+        output_folder = "logs"
+        output_path = Path(output_folder) / output_file
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -335,30 +452,66 @@ def serve_image(filepath):
     parts = filepath.split('/')
     print(f"[DEBUG] Path parts: {parts}")
 
-    if len(parts) >= 3:
-        # Find the category folder and serve from there
-        category = parts[-3]  # e.g., "animal", "person", etc.
-        filename = parts[-1]  # e.g., "OD-FN-07749.png"
+    if len(parts) >= 2:
+        # Handle both path structures:
+        # 1. category/images/filename (3 parts) - standard structure
+        # 2. category/filename (2 parts) - for files directly in category folder (like MP4s)
 
-        print(f"[DEBUG] Extracted category: {category}, filename: {filename}")
+        if len(parts) >= 3:
+            # Standard structure: category/images/filename
+            category = parts[-3]  # e.g., "animal", "person", etc.
+            subdirectory = parts[-2]  # e.g., "images"
+            filename = parts[-1]  # e.g., "OD-FN-07749.png"
 
-        if player and player.categorized_images_path:
-            category_path = player.categorized_images_path / category / "images"
-            full_image_path = category_path / filename
+            print(f"[DEBUG] Standard path structure - Category: {category}, Subdirectory: {subdirectory}, Filename: {filename}")
 
-            print(f"[DEBUG] Looking for image at: {full_image_path}")
-            print(f"[DEBUG] Category path exists: {category_path.exists()}")
-            print(f"[DEBUG] Image file exists: {full_image_path.exists()}")
+            if player and player.categorized_images_path:
+                category_path = player.categorized_images_path / category
+                full_image_path = category_path / subdirectory / filename
 
-            if category_path.exists() and full_image_path.exists():
-                print(f"[DEBUG] Serving image: {full_image_path}")
-                return send_from_directory(category_path, filename)
-            else:
-                print(f"[DEBUG] Image not found: {full_image_path}")
+                print(f"[DEBUG] Looking for image at: {full_image_path}")
+                print(f"[DEBUG] Category path exists: {category_path.exists()}")
+                print(f"[DEBUG] Image file exists: {full_image_path.exists()}")
+
+                if category_path.exists() and full_image_path.exists():
+                    print(f"[DEBUG] Serving image: {full_image_path}")
+                    # Add cache control headers to ensure fresh loading
+                    from flask import make_response
+                    response = send_from_directory(category_path / subdirectory, filename)
+                    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                    response.headers['Pragma'] = 'no-cache'
+                    response.headers['Expires'] = '0'
+                    return response
+                else:
+                    print(f"[DEBUG] Image not found: {full_image_path}")
         else:
-            print("[DEBUG] Player or categorized_images_path not available")
+            # Alternative structure: category/filename (for files directly in category folder)
+            category = parts[-2]  # e.g., "animal"
+            filename = parts[-1]  # e.g., "Media1.mp4"
+
+            print(f"[DEBUG] Alternative path structure - Category: {category}, Filename: {filename}")
+
+            if player and player.categorized_images_path:
+                category_path = player.categorized_images_path / category
+                full_image_path = category_path / filename
+
+                print(f"[DEBUG] Looking for image at: {full_image_path}")
+                print(f"[DEBUG] Category path exists: {category_path.exists()}")
+                print(f"[DEBUG] Image file exists: {full_image_path.exists()}")
+
+                if category_path.exists() and full_image_path.exists():
+                    print(f"[DEBUG] Serving image: {full_image_path}")
+                    # Add cache control headers to ensure fresh loading
+                    from flask import make_response
+                    response = send_from_directory(category_path, filename)
+                    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                    response.headers['Pragma'] = 'no-cache'
+                    response.headers['Expires'] = '0'
+                    return response
+                else:
+                    print(f"[DEBUG] Image not found: {full_image_path}")
     else:
-        print("[DEBUG] Invalid path structure")
+        print("[DEBUG] Invalid path structure - need at least category/filename")
 
     return "Image not found", 404
 
@@ -894,8 +1047,9 @@ def create_templates():
             const imagePath = imageData.image_path;
             const isVideo = imageData.is_video;
             const isGif = imageData.is_gif;
+            const isAnimatedGif = imageData.is_animated_gif || false; // Use server-side detection
 
-            console.log('Displaying image:', imageData.test_case_id, imagePath);
+            console.log('Displaying image:', imageData.test_case_id, imagePath, 'isAnimatedGif:', isAnimatedGif);
 
             if (isVideo) {
                 // For videos, just play them without motion effects
@@ -906,12 +1060,53 @@ def create_templates():
                 video.autoplay = true;
                 video.loop = true;
                 video.muted = true; // Mute to allow autoplay
+                video.playsInline = true; // Ensure inline playback on mobile
+                video.preload = 'metadata'; // Preload metadata for faster loading
 
-                // Add error handling
+                // Add loading and error handling
+                video.onloadeddata = function() {
+                    console.log('Video loaded successfully:', imagePath);
+                    // Try to play the video (fallback for browsers that don't respect autoplay)
+                    const playPromise = video.play();
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            console.log('Video started playing automatically');
+                        }).catch(error => {
+                            console.log('Autoplay failed, video will play on user interaction:', error);
+                            // Add click to play functionality
+                            video.onclick = () => video.play();
+                            container.onclick = () => video.play();
+                        });
+                    }
+                };
+
                 video.onerror = function() {
                     console.error('Video failed to load:', imagePath);
-                    // Show error message
-                    container.innerHTML = '<div style="color: red; font-size: 2rem;">Video Error: ' + imageData.test_case_id + '</div>';
+                    // Show error message with retry option
+                    container.innerHTML = `
+                        <div style="color: red; font-size: 2rem; text-align: center; padding: 2rem;">
+                            <div>Video Error: ${imageData.test_case_id}</div>
+                            <div style="font-size: 1rem; margin-top: 1rem;">File: ${imagePath}</div>
+                            <button onclick="location.reload()" style="
+                                background: #ff4444;
+                                color: white;
+                                border: none;
+                                padding: 0.5rem 1rem;
+                                margin-top: 1rem;
+                                border-radius: 5px;
+                                cursor: pointer;
+                            ">Retry</button>
+                        </div>
+                    `;
+                };
+
+                video.onended = function() {
+                    console.log('Video ended, restarting playback...');
+                    // Restart the video automatically
+                    video.currentTime = 0;
+                    video.play().catch(error => {
+                        console.log('Error restarting video:', error);
+                    });
                 };
 
                 container.appendChild(video);
@@ -924,34 +1119,19 @@ def create_templates():
 
                 // Add error handling
                 img.onload = function() {
-                    console.log('Image loaded successfully:', imagePath);
+                    console.log('Image loaded successfully:', imagePath, 'Type:', isGif ? 'GIF' : 'Static Image');
 
-                    // Add enhanced motion effect for all static content (not video)
-                    if (!isVideo && motionIntensity > 0) {
-                        console.log(`[MOTION] Applying motion effect to ${imageData.test_case_id}: intensity=${motionIntensity}, duration=${durationSeconds}s, isVideo=${isVideo}, isGif=${isGif}`);
+                    // Use server-side detection for GIF animation
+                    const shouldAnimate = isAnimatedGif;
+                    console.log(`[GIF] ${imageData.test_case_id} is ${shouldAnimate ? 'animated' : 'static'} GIF (server-detected: ${isAnimatedGif})`);
 
-                        // Add visual indicator that motion is active
-                        const motionIndicator = document.createElement('div');
-                        motionIndicator.id = 'motion-indicator';
-                        motionIndicator.style.cssText = `
-                            position: fixed;
-                            top: 10px;
-                            right: 10px;
-                            background: #ff0000;
-                            color: white;
-                            padding: 5px 10px;
-                            border-radius: 5px;
-                            font-size: 12px;
-                            z-index: 10000;
-                        `;
-                        motionIndicator.textContent = `MOTION: ${motionIntensity}%`;
+                    // Debug: show all animation-related flags
+                    console.log(`[DEBUG] Animation flags - isVideo: ${isVideo}, isGif: ${isGif}, isAnimatedGif: ${isAnimatedGif}, shouldAnimate: ${shouldAnimate}`);
 
-                        // Remove existing indicator
-                        const existing = document.getElementById('motion-indicator');
-                        if (existing) existing.remove();
-
-                        document.body.appendChild(motionIndicator);
-
+                    // Add enhanced motion effect for static content only (not video, not animated GIF)
+                    // But also skip GIF files entirely if user wants no motion on any GIF
+                    const skipGifMotion = true; // Set to true to disable motion on ALL GIF files
+                    if (!isVideo && motionIntensity > 0 && !shouldAnimate && (!isGif || !skipGifMotion)) {
                         // Remove any existing motion styles
                         container.classList.remove('moving', 'intense');
                         container.style.animation = '';
@@ -962,17 +1142,10 @@ def create_templates():
 
                         // Reset animation after playback duration
                         setTimeout(() => {
-                            console.log(`[MOTION] Resetting motion for ${imageData.test_case_id}`);
                             container.classList.remove('moving', 'intense');
                             container.style.animation = '';
                             container.style.transform = '';
-
-                            // Remove motion indicator
-                            const indicator = document.getElementById('motion-indicator');
-                            if (indicator) indicator.remove();
                         }, durationSeconds * 1000);
-                    } else {
-                        console.log(`[MOTION] Skipping motion effect for ${imageData.test_case_id}: intensity=${motionIntensity}, isVideo=${isVideo}, isGif=${isGif}`);
                     }
                 };
 
@@ -1064,9 +1237,9 @@ def create_templates():
             document.body.removeChild(link);
         }
 
-        function applySimpleMotionEffect(container, intensity, durationSeconds) {
-            console.log(`[MOTION] Applying motion effect: intensity=${intensity}%, duration=${durationSeconds}s`);
 
+
+        function applySimpleMotionEffect(container, intensity, durationSeconds) {
             const factor = intensity / 100;
             const maxTranslate = 80 * factor; // 80px max movement - more natural
             const stepInterval = (durationSeconds * 0.4 * 1000) / 10; // 10 steps in motion phase
@@ -1077,8 +1250,6 @@ def create_templates():
 
             // Phase 2: Motion (20-60%)
             setTimeout(() => {
-                console.log(`[MOTION] Starting motion phase with ${maxTranslate}px amplitude`);
-
                 // Natural motion sequence
                 const motions = [
                     `translate(${maxTranslate * 0.6}px, ${-maxTranslate * 0.4}px) scale(1.15) rotate(3deg)`,
@@ -1093,7 +1264,6 @@ def create_templates():
 
                 motions.forEach((motion, index) => {
                     setTimeout(() => {
-                        console.log(`[MOTION] Step ${index + 1}: ${motion}`);
                         container.style.transform = motion;
                     }, index * 400); // 400ms between each step - slower pace
                 });
@@ -1102,7 +1272,6 @@ def create_templates():
 
             // Phase 3: Back to static (60%+)
             setTimeout(() => {
-                console.log(`[MOTION] Back to static`);
                 container.style.transition = 'transform 1.5s ease-out';
                 container.style.transform = 'translate(0, 0) scale(1) rotate(0deg)';
             }, durationSeconds * 0.6 * 1000);

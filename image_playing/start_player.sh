@@ -8,7 +8,7 @@ echo "    Image Player Server Launcher"
 echo "========================================"
 
 # Default values
-DEFAULT_IMAGES="../image_selector/categorized_images"
+DEFAULT_IMAGES="../categorized_images_test"
 DEFAULT_PORT=5002
 DEFAULT_DURATION=60
 DEFAULT_MOTION_INTENSITY=100

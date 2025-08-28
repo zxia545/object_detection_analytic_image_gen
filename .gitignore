@@ -17,4 +17,5 @@ __pycache__/
 image_preview/downloaded_images/*
 image_preview/huggingface_cache/*
 
-*.png
+categorized_images_test/*
+image_playing/logs/*

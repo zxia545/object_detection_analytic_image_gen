@@ -187,8 +187,9 @@
             const imagePath = imageData.image_path;
             const isVideo = imageData.is_video;
             const isGif = imageData.is_gif;
+            const isAnimatedGif = imageData.is_animated_gif || false; // Use server-side detection
 
-            console.log('Displaying image:', imageData.test_case_id, imagePath);
+            console.log('Displaying image:', imageData.test_case_id, imagePath, 'isAnimatedGif:', isAnimatedGif);
 
             if (isVideo) {
                 // For videos, just play them without motion effects
@@ -199,12 +200,53 @@
                 video.autoplay = true;
                 video.loop = true;
                 video.muted = true; // Mute to allow autoplay
+                video.playsInline = true; // Ensure inline playback on mobile
+                video.preload = 'metadata'; // Preload metadata for faster loading
 
-                // Add error handling
+                // Add loading and error handling
+                video.onloadeddata = function() {
+                    console.log('Video loaded successfully:', imagePath);
+                    // Try to play the video (fallback for browsers that don't respect autoplay)
+                    const playPromise = video.play();
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            console.log('Video started playing automatically');
+                        }).catch(error => {
+                            console.log('Autoplay failed, video will play on user interaction:', error);
+                            // Add click to play functionality
+                            video.onclick = () => video.play();
+                            container.onclick = () => video.play();
+                        });
+                    }
+                };
+
                 video.onerror = function() {
                     console.error('Video failed to load:', imagePath);
-                    // Show error message
-                    container.innerHTML = '<div style="color: red; font-size: 2rem;">Video Error: ' + imageData.test_case_id + '</div>';
+                    // Show error message with retry option
+                    container.innerHTML = `
+                        <div style="color: red; font-size: 2rem; text-align: center; padding: 2rem;">
+                            <div>Video Error: ${imageData.test_case_id}</div>
+                            <div style="font-size: 1rem; margin-top: 1rem;">File: ${imagePath}</div>
+                            <button onclick="location.reload()" style="
+                                background: #ff4444;
+                                color: white;
+                                border: none;
+                                padding: 0.5rem 1rem;
+                                margin-top: 1rem;
+                                border-radius: 5px;
+                                cursor: pointer;
+                            ">Retry</button>
+                        </div>
+                    `;
+                };
+
+                video.onended = function() {
+                    console.log('Video ended, restarting playback...');
+                    // Restart the video automatically
+                    video.currentTime = 0;
+                    video.play().catch(error => {
+                        console.log('Error restarting video:', error);
+                    });
                 };
 
                 container.appendChild(video);
@@ -217,34 +259,19 @@
 
                 // Add error handling
                 img.onload = function() {
-                    console.log('Image loaded successfully:', imagePath);
+                    console.log('Image loaded successfully:', imagePath, 'Type:', isGif ? 'GIF' : 'Static Image');
 
-                    // Add enhanced motion effect for all static content (not video)
-                    if (!isVideo && motionIntensity > 0) {
-                        console.log(`[MOTION] Applying motion effect to ${imageData.test_case_id}: intensity=${motionIntensity}, duration=${durationSeconds}s, isVideo=${isVideo}, isGif=${isGif}`);
+                    // Use server-side detection for GIF animation
+                    const shouldAnimate = isAnimatedGif;
+                    console.log(`[GIF] ${imageData.test_case_id} is ${shouldAnimate ? 'animated' : 'static'} GIF (server-detected: ${isAnimatedGif})`);
 
-                        // Add visual indicator that motion is active
-                        const motionIndicator = document.createElement('div');
-                        motionIndicator.id = 'motion-indicator';
-                        motionIndicator.style.cssText = `
-                            position: fixed;
-                            top: 10px;
-                            right: 10px;
-                            background: #ff0000;
-                            color: white;
-                            padding: 5px 10px;
-                            border-radius: 5px;
-                            font-size: 12px;
-                            z-index: 10000;
-                        `;
-                        motionIndicator.textContent = `MOTION: ${motionIntensity}%`;
+                    // Debug: show all animation-related flags
+                    console.log(`[DEBUG] Animation flags - isVideo: ${isVideo}, isGif: ${isGif}, isAnimatedGif: ${isAnimatedGif}, shouldAnimate: ${shouldAnimate}`);
 
-                        // Remove existing indicator
-                        const existing = document.getElementById('motion-indicator');
-                        if (existing) existing.remove();
-
-                        document.body.appendChild(motionIndicator);
-
+                    // Add enhanced motion effect for static content only (not video, not animated GIF)
+                    // But also skip GIF files entirely if user wants no motion on any GIF
+                    const skipGifMotion = true; // Set to true to disable motion on ALL GIF files
+                    if (!isVideo && motionIntensity > 0 && !shouldAnimate && (!isGif || !skipGifMotion)) {
                         // Remove any existing motion styles
                         container.classList.remove('moving', 'intense');
                         container.style.animation = '';
@@ -255,17 +282,10 @@
 
                         // Reset animation after playback duration
                         setTimeout(() => {
-                            console.log(`[MOTION] Resetting motion for ${imageData.test_case_id}`);
                             container.classList.remove('moving', 'intense');
                             container.style.animation = '';
                             container.style.transform = '';
-
-                            // Remove motion indicator
-                            const indicator = document.getElementById('motion-indicator');
-                            if (indicator) indicator.remove();
                         }, durationSeconds * 1000);
-                    } else {
-                        console.log(`[MOTION] Skipping motion effect for ${imageData.test_case_id}: intensity=${motionIntensity}, isVideo=${isVideo}, isGif=${isGif}`);
                     }
                 };
 
@@ -357,9 +377,9 @@
             document.body.removeChild(link);
         }
 
-        function applySimpleMotionEffect(container, intensity, durationSeconds) {
-            console.log(`[MOTION] Applying motion effect: intensity=${intensity}%, duration=${durationSeconds}s`);
 
+
+        function applySimpleMotionEffect(container, intensity, durationSeconds) {
             const factor = intensity / 100;
             const maxTranslate = 80 * factor; // 80px max movement - more natural
             const stepInterval = (durationSeconds * 0.4 * 1000) / 10; // 10 steps in motion phase
@@ -370,8 +390,6 @@
 
             // Phase 2: Motion (20-60%)
             setTimeout(() => {
-                console.log(`[MOTION] Starting motion phase with ${maxTranslate}px amplitude`);
-
                 // Natural motion sequence
                 const motions = [
                     `translate(${maxTranslate * 0.6}px, ${-maxTranslate * 0.4}px) scale(1.15) rotate(3deg)`,
@@ -386,7 +404,6 @@
 
                 motions.forEach((motion, index) => {
                     setTimeout(() => {
-                        console.log(`[MOTION] Step ${index + 1}: ${motion}`);
                         container.style.transform = motion;
                     }, index * 400); // 400ms between each step - slower pace
                 });
@@ -395,7 +412,6 @@
 
             // Phase 3: Back to static (60%+)
             setTimeout(() => {
-                console.log(`[MOTION] Back to static`);
                 container.style.transition = 'transform 1.5s ease-out';
                 container.style.transform = 'translate(0, 0) scale(1) rotate(0deg)';
             }, durationSeconds * 0.6 * 1000);
